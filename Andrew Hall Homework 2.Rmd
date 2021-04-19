@@ -1,0 +1,58 @@
+---
+title: "Andrew Hall Homework 2"
+author: "Andrew Hall"
+date: "3/1/2021"
+output: html_document
+---
+
+```{r, Setup, include=TRUE, echo=TRUE}
+library(tidyverse)
+library(ggplot2)
+
+#Creating an object called "congress_DB" and telling R to read in the #congressional_hearings.csv file
+
+congress_DB <- read.csv("C://Users/alhall/Desktop/ALH Desktop/congressional_hearings.csv", sep=",", header=T)
+```
+
+```{r, Exploration, include=TRUE, echo=TRUE}
+
+dim(congress_DB)
+
+#The congressional hearings dataset has 100,254 #observations (rows) and 36 attributes (columns). 
+
+colnames(congress_DB)
+table(select(congress_DB, year, subtopic))
+table(select(congress_DB,Committee1))
+#Note: The first tabulation resulted in the number of rows exceeding the maximum number of rows allowed in the table(select()) function. Consider filtering or subsetting this data set. There were a lot of zero values for certain subtopics so I would want to look into whether those subtopics were discontinued (and therefore should probably be dropped) or if they just happened to not appear in those years. 
+#The tabulation shows that I would need to do some further exploration into the "subtopic" variable since the referral bill number is not useful. I should consult the data dictionary for recoding the variable names so that I can see what the topic was. I could also recode the Committee1 variable so that the labels are the House Committee names at the 3-digit level. I created the second table in order to assess how much recoding I might need to do by hand. House Committee codes start at 102, so I would also want to clarify what the codes "-9" and "0" mean, especially given that 692 and 12 records, respectively, were given those codes. If they are just null values, then I might reassign them the same null value, NA. 
+
+```
+
+```{}
+```
+
+```{}
+```
+
+```{}
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
