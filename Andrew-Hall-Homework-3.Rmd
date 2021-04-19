@@ -1,0 +1,215 @@
+---
+title: "Analysis of U.S. Bureau of Labor Statistics Current Population Survey"
+author: "Andrew Hall"
+date: "3/23/2021"
+output:
+  pdf_document: default
+  html_document: default
+---
+This project lays the groundwork for some analysis that I will be doing on the impacts of the COVID-19 pandemic on occupaitonal employment in Massachusetts. One of my colleagues is creating a data dictionary where he is defining and qualtitatively coding detailed Standard Occupational Classification (SOC) coded in terms of being "essential" or "non-essential" based on the degree to which those positions require regularly interaction with the general public and must be performed in person. In a later step of this project, I will be crosswalking their coding system to a data set of employment statistics with SOC-based occupational codes. 
+
+Employment (and unemployment) data by occupation are available only from several public sources. One major challenge in this project has been the trade off between data sources that provide occupational detail that we need and an appropriate periodicity that would enable us to measure the impacts of the coronavirus pandemic on employment. The Occupational Employment Statistics (OES) from the U.S. BLS provide detailed occupational employment data for the state, but these data are annual and the latest year available is 2019. Emsi is a proprietary source that combines their own estimations to publicly available data for smaller geographies and detailed SOCs which would otherwise have been suppressed from public sources to prevent identification of firms and individuals. This source has a long time series and SOC detail, but like the OES it is annual. The state releases weekly initial unemployment claims data, which would tell us employment impacts by counting the number of new claimants; however, occupational information is provided at the 2-digit level, which is the most general level. The U.S. BLS has another series called the Current Population Survey (CPS), and the microdata by month are available from IPUMS-USA. These data provide a level of occupational detail as well as employment by month, which would make this source the most useful. IPUMS data sets represent unweighted survey responses on labor market statistics, so using these data would require the additional step of applying survey weights to the data, which are luckily included as a variable. 
+
+The universe represented in this data set is the working-age population (16 years of age and over) and residents of Massachusetts (defined by respondents who lived in FIPS code 25 during the survey period) by month through January 2021. This data set includes both workplace location (place of work) and workers' location (FIPS state). This distinction is important because we want to examine the impact of COVID-19 on Massachusetts residents, regardless of where they work, rather than Massachusetts workers, regardless of where they work. These are frequently not the same groups of people. When I conduct my analysis later this spring, I will likely refresh the data set that I use so that it includes more recent months of data. 
+
+The exploration below imports the dataset, applies the survey weights, and performs a few queries on the labor force and unemployment, which I used to check whether the weighted totals made sense. The labor force and unemployment counts for the state are available from the Massachusetts Executive Office of Labor and Workforce Development's Local Area Unemployment (LAU) series. I compare the results of the unemployment analysis below to the known totals from this series; and based on the results of this comparison, I will know whether or not I can reliably use this data set for my project.
+
+```{r Updating R, include=TRUE}
+
+#Updating existing packages
+#update.packages()
+
+#Installing new packages needed for this project
+#install.packages("survey")
+#install.packages("tidyverse")
+#install.packages("formattable")
+#install.packages("srvyr")
+#install.packages("foreign")
+#install.packages("xlsx")
+
+```
+
+At the time of this project, IPUMS did not provide the data set in a format the could easily be read by R, such as .csv or in an R format. Therefore, I exported the data into a .dta format, which is typically the format used by Stata. I also selected this format because I initially thought of running these queries in Stata alongside R and comparing my results to test whether my R code was doing what I expected it to do. This also meant that I needed to use haven::read_dta in order to read that file type into R. 
+
+```{r Importing the dataset, include=TRUE}
+#Importing the dataset
+
+library("haven")
+library("tidyverse")
+library("foreign")
+cps_unweighted <- read_dta(file = "C://Users/alhall/Desktop/ALH Desktop/CPS Experiment/cps_00008.dta") 
+
+```
+
+After importing the .dta file, I started to recode and create new variables in the unweighted data. 
+
+My first attempt to apply the weights yielded numbers that were about 10,000 times higher than I would expect. I created a different weight variable that adjusted the magnitude of the weights. Eventually, the original weight variable worked, so I did not end up using my "newweight" variable.
+
+The data include separate columns for month and year, so I created a new variable that combined them into a "date", which concatenated these variables into something that I could use. I realized later on that I would need to reformat this variable again so that R would recognize that it was a date instead of a string of text. I will need to go back and use the Lubridate function to turn this variable into a date. 
+
+In the IPUMS data set, employment status and labor force status are indicated by several discrete codes. One mutation that I performed was to recode them into more meaningful categories for me, such as "employed" or "unemployed" and "in the labor force" and "not in the labor force (NILF)". Since one well-documented outcome of the COVID-19 pandemic was that many people dropped out of the labor force, either because they were discouraged in their job searches or because they stopped working to take care of family members, I also created a variable that looked into the different reasons for not being in the labor force in case I decide to examine this in more detail. 
+
+Later on in my analysis, I realized that I would want to create a data frame that contained counts of people who were unemployed, employed, and in the labor force. However, the initial recoding that I did did not result in data that I could easily use to collapse or sum counts of records in those categories. Thus, I returned to this section and added variables that would assign the value of "1" to those who were in those categories so that later on I could sum across the data set to create a "total" concept for each of those variables. This new set of variables or flags would also enable me to calculate a monthly unemployment rate, which is the total number of unemployed persons divided by the total number of persons in the labor force. These flags would provide both the numerator and denominator that I would need for creating my own unemployment rates (or UERs).
+
+At the end, I tabulated some of my new variables to see if the results were making sense. The numbers themselves reflect the unweighted data so they would not correspond to known totals for unemployment, employment, and the labor force. 
+
+```{r Recoding and generating new variables, include=TRUE}
+
+cps_unweighted <- cps_unweighted %>% 
+  mutate(newweight = wtfinl/10000) %>% 
+  mutate(date = paste(month, "/", year)) %>% 
+  mutate(empstatrecode = case_when(
+          empstat == 0 ~ "NA",
+          empstat == 1 ~ "ArmedServices",
+          empstat == 10 | empstat == 12 ~ "Employed",
+          empstat == 21 | empstat == 22 ~ "Unemployed",
+          empstat >= 31 ~ "NILF")) %>% 
+  mutate(labforcerecode = case_when(
+          labforce == 0 ~ "NA",
+          labforce == 1 ~ "NILF",
+          labforce == 2 ~ "InLF")) %>% 
+  mutate(NILFreason = case_when(
+          empstat == 31 ~ "Housework",
+          empstat == 32 ~ "UnableToWork",
+          empstat == 33 ~ "School",
+          empstat == 34 ~ "Other",
+          empstat == 35 ~ "WorkingUpdaidLT15Hrs",
+          empstat == 36 ~ "Retired")) %>% # Note: Double-check the ages of the records and cross-tabulate with employment status variable. Maybe NAs employment status refer to survey respondents who were younger than 16? 
+  mutate(unemplflag = case_when(
+          empstatrecode == "Unemployed" ~ 1,
+          empstatrecode != "Unemployed" ~ 0)) %>%  
+  mutate(inlfflag = case_when(
+          labforcerecode == "InLF" ~ 1,
+          labforcerecode != "InLF" ~ 0)) %>% 
+  mutate(emplflag = case_when(
+          empstatrecode == "Employed" ~ 1,
+          empstatrecode != "Employed" ~ 0)) 
+
+#Checking my recodes of the unweighted data
+table(select(cps_unweighted, empstatrecode)) #Checks to see if the recoded variables are correct. Note: These are unweighted values so the numbers will not compare to knowable totals in those categories.
+table(select(cps_unweighted, date))
+table(select(cps_unweighted, labforcerecode))
+table(select(cps_unweighted, unemplflag))
+cps_unweighted
+
+```
+
+After creating new variables, I applied the sample weights to the data set and created a few tabulations of the weighted data. To improve readability, I added a comma function that would include comma separators in the labor force data. Also, the results of my tabulations are relatively close to the known numbers for those concepts from the LAU source. This means that the weighting procedure worked and my data are making enough sense for me to continue using this data set for the rest of my project. 
+
+```{r Applying sample weights, include=TRUE}
+#Applying sample weights to the dataset using the wtfinl weight variable
+library("survey")
+cps_weighted <- svydesign(ids = ~1, weights = ~wtfinl, data = cps_unweighted) #Applies the weight variable "wtfinl" to the uneweighted data frame/data set, cps_unweighted. The "~" symbol tells R to look for the variable that follows it in the data set.
+
+#Tabulating the weighted data
+library("dplyr")
+library("survey")
+library("formattable")
+table(cps_unweighted$empstatrecode) 
+comma(svytable(~date+empstatrecode, design = cps_weighted), digits = 3, big.mark = ",") #Note: I nested this within a comma function which inserts a comma separator at the 3rd, or thousands, place to help readability.
+comma(svytable(~date+empstatrecode, design = cps_weighted), digits = 3, big.mark = ",") #Check: According to the BLS (LAU), the Massachusetts labor force should be in the ballpark of 3.7 million and the number of employed should be around 3.5 million.
+comma(svytable(~date+labforcerecode, design = cps_weighted), digits = 3, big.mark = ",") 
+
+
+```
+
+Here, I create collapsed subsets of the weighted data that show aggregated totals and averages by date and year. 
+
+Creating collapsed versions of the weighted data was not straightforward and I discovered a few methods that worked and a few that did not. All of the methods that I tried have been included in the code chunk below in order to keep a record of the ones that failed so that I could return to them later and find out what went wrong. The code that failed has been commented out. 
+
+```{r Creating collapsed versions of the data, include=TRUE}
+#One method of collapsing values into totals by month and calculating monthly unemployment rates (UERs)
+library("dplyr")
+library("survey")
+library("srvyr")
+cps_collapsedbydate <- cps_weighted %>% 
+as_survey_design(cps_unweighted, weights = wtfinl) %>% 
+  group_by(date) %>% 
+  summarize(Totalunempl = survey_total(unemplflag),
+            Totalempl = survey_total(emplflag),
+            TotalLF = survey_total(inlfflag)) %>% 
+  mutate(UER = Totalunempl/TotalLF*100)
+  summary(cps_collapsedbydate)
+
+
+cps_collapsedbyMoYr <- cps_weighted %>% #Pipes the cps_weighted data frame through the data transformations below and creates a new collapsed data set based on the month and year
+  as_survey_design(cps_unweighted, weights = wtfinl) %>% 
+  group_by(month, year) %>% 
+  summarize(Totalunempl = survey_total(unemplflag),
+            Totalemp = survey_total(emplflag),
+            TotalLF = survey_total(inlfflag)) %>% 
+  mutate(UER = Totalunempl/TotalLF*100)
+#summary(cps_collapsedbyMoYr) This has been commented out because it combines two different periods (months and years), and I think that the means, medians, and other descriptive statistics would be more meaningful if they were for the same period. Note: Look up applying a filter to the summary function and compare to the summary results of the data sets that separate the time periods.
+
+
+cps_collapsedbyyear <- cps_collapsedbyMoYr %>% #creates a collapsed data frame through the data transformations below based on the collapsed data set by month and year and creates a new collapsed data set of annual averages 
+  group_by(year) %>% 
+  summarize(Aveannunempl = mean(Totalunempl),
+            Aveannemp = mean(Totalemp),
+            AveannLF = mean(TotalLF),
+            AveUER = mean(UER))
+  summary(cps_collapsedbyyear)
+  
+  
+library("dplyr")
+
+table(select(cps_collapsedbydate, date))
+#table(cps_collapsed$date, cps_collapsed$UER)
+
+#Alternative method of collapsing values into totals by month and calculating monthly unemployment rates (UERs)
+library("survey")
+library("srvyr")
+cps_collapsed2 <- as_survey_design(cps_unweighted, weights = wtfinl) 
+cps_weightedcollapsed2 <- cps_collapsed2 %>% 
+  group_by(date) %>% 
+  summarize(Totalunempl = srvyr::survey_total(unemplflag),
+            TotalLF = srvyr::survey_total(inlfflag)) %>% 
+  mutate(UER = Totalunempl/TotalLF*100)
+            #total_unweighted = srvyr::unweighted(n())) Note: I commented this out because the results did not make sense. I would like to come back to this and figure out what went wrong. 
+
+head(cps_weightedcollapsed2)
+summary(cps_weightedcollapsed2)
+
+#table(select(cps_weightedcollapsed2, date + UER)) #NOTE: This resulted in the error "object UER not found"
+
+#Failed attempts at collapsing the values into totals
+
+#Third method of collapsing values into totals by month ---- NOTE: THIS METHOD FAILED (I still need to figure out why)
+#library("survey")
+#library("srvyr")
+#cps_collapsed3 <- as_survey_design(cps_unweighted, weights = wtfinl)
+#cps_weightedcollapsed3 <- cps_collapsed3 %>% 
+  #group_by(date) %>% 
+  #svytotal(design = survey.design, Totalunempl = srvyr::survey_total(unemplflag),
+            #TotalLF = srvyr::survey_total(inlfflag)) %>% 
+ #mutate(UER = Totalunempl/TotalLF*100)
+
+# Fourth method of collapsing values into totals --- NOTE: THIS METHOD FAILED (I still need to figure out why)
+#library("survey")
+#library("srvyr")
+#cps_weightedcollapsed4 <- svydesign( ~1, data = cps_unweighted, weights = ~wtfinl) 
+#table <- svyby(cps_weightedcollapsed4, ~date + ~unemplflag + ~inlfflag, svytotal)
+
+```
+
+In this last section, I plot the monthly and average annual data in a line graph. I find that these types of data visualizations are the most appropriate for showing time series data, especially when I do not need to show any distinctions among constituent components of the line (which would be more appropriately shown in a different graph such as a stacked bar chart).  
+
+This was where I realized that my date variable was not operating like a date because instead of chronological order, the variables were in numerical order, starting with all of the January dates (because the month was indicated by the number 1).
+
+For the graph that was produced, I realized that I might want to include data labels in the graph or a few contextual points of reference at the two peaks in the graph--namely the Great Recession and the COVID-19 Recession. 
+
+
+```{r Plotting the results, include=TRUE}
+#Plotting the monthly and average annual data
+#ggplot(data = cps_collapsedbydate, mappingm = aes(x = date, y = UER))+
+    #geom_line()
+    #geom_point() #This did not work because the dates are not in chronological order. Note: I need to figure out how to sort the data so that they are in order from earliest to latest month.
+
+
+ggplot(data = cps_collapsedbyyear, mapping = aes(x = year, y = AveUER))+
+    geom_line() +
+    geom_point() +
+    labs(title = "Annual Average Unemployment Rates in Massachusetts, 2000-2020", x = "Year", y = "Unemployment Rate (%)") #Annual averages should smooth out a lot of the seasonality in the unemployment data. Check for sense; Looking at the plot, the peak unemployment rates were in 2010 and 2020, which correspond with the Great Recession and the COVID-19 pandemic. Also, I know that 2019 was characterized with having historically low unemployment (a 15-year low in fact). Given how 2021 reflects a partial year (just one month), I should filter that out of the plot so that only full years are displayed. I might also consider adding data labels to the graph to provide context for those two highest points.
+    
+
+```
